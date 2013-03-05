@@ -1,0 +1,156 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=7,IE=9">
+  <meta name="viewport" content="initial-scale=1, maximum-scale=1,user-scalable=no">
+  <title>Follow the Hootsuite Bus!</title>
+  <link rel="stylesheet" type="text/css" href="http://serverapi.arcgisonline.com/jsapi/arcgis/3.3/js/esri/css/esri.css">
+  <link rel="stylesheet" href="styles.css">
+  <!-- Load the library references for ArcGIS API for JavaScript -->
+  <script src="http://serverapi.arcgisonline.com/jsapi/arcgis/3.3compact"></script>
+  <script type="text/javascript" src="https://api.geoloqi.com/js/geoloqi.min.js"></script>
+  <script>
+    dojo.require("esri.map");
+    dojo.require("esri.dijit.Popup");
+    
+    var geoloqiToken = "58rMWnW"; // Hootsuite
+
+    var map;
+    var graphic;
+
+    function init() {
+      var options = { 
+        basemap: "gray",
+        center: [-97.7441, 30.2724], // Austin, TX
+        zoom: 16,
+        infoWindow: new esri.dijit.Popup(null, dojo.create("div"))  // Define a popup
+      };
+
+      // Create map
+      map = new esri.Map("mapDiv", options);
+      autoResize(map);
+
+      // Init the Geoloqi library with no authentication
+      geoloqi.init({});
+      geoloqi.auth = {access_token: "x"};
+
+      map.on('load', function(){
+        require(["dojo/request"], function(request){
+          request("/route.json").then(
+            function(text){
+              var data = JSON.parse(text);
+              var line = new esri.geometry.Polyline(data);
+              var symbol = new esri.symbol.SimpleLineSymbol('solid', new dojo.Color([20, 70, 122, 0.75]), 5);
+              var graphic = new esri.Graphic(line, symbol);
+              map.graphics.add(graphic);
+            },
+            function(error){
+              console.log("An error occurred: " + error);
+            }
+          );
+        });
+
+        // Get the last location from the Geoloqi API
+        geoloqi.get('share/last?geoloqi_token='+geoloqiToken, function(result, error) {
+
+          var symbol = new esri.symbol.PictureMarkerSymbol({
+            angle: 0,
+            xoffset: -16,
+            yoffset: 23,
+            type: "esriPMS",
+            url: "images/hootsuite-owl.png",
+            contentType: "image/png",
+            width: 62,
+            height: 54
+          })
+
+          var pt = pointFromGeoloqiResult(result);
+
+          var attributes = { 
+            lat: rounded6(pt.y),
+            lng: rounded6(pt.x),
+            time: timeFormatted(result.date_ts)
+          };
+          infoTemplate = new esri.InfoTemplate("Current Location","Time: ${time}<br/>Latitude: ${lat}<br/>Longitude: ${lng}<br/><span class='popupZoom' onclick='zoomToPlace(" + pt.x + "," + pt.y + ",15)';>Zoom To</span>");
+          graphic = new esri.Graphic(pt, symbol, attributes, infoTemplate);
+
+          // Add the pin to the map
+          map.graphics.add(graphic);
+
+          // If the location of the tracker is outside the visible window, pan the map
+          recenterMapOnPoint(pt);
+
+          // Set a timeout to start polling location
+          setTimeout(updateCurrentLocation, 5000);
+        });
+
+      });
+
+    }
+
+    function updateCurrentLocation() {
+      geoloqi.get('share/last?geoloqi_token='+geoloqiToken, function(result, error) {
+        var pt = pointFromGeoloqiResult(result);
+
+        graphic.setGeometry(pt);
+        graphic.setAttributes({
+          lat: rounded6(pt.y),
+          lng: rounded6(pt.x),
+          time: timeFormatted(result.date_ts)
+        });
+
+        recenterMapOnPoint(pt);
+
+        setTimeout(updateCurrentLocation, 5000);
+      });
+    }
+
+    function recenterMapOnPoint(pt) {
+      if(!map.extent.contains(pt)) {
+        map.setExtent(map.extent.centerAt(esri.geometry.geographicToWebMercator(pt)));
+      }
+    }
+
+    // Rounds to 6 decimal places
+    function rounded6(num) {
+      return Math.round(num*1000000) / 1000000;
+    }
+
+    function timeFormatted(unixtimestamp) {
+      var date = new Date(unixtimestamp * 1000);
+      return date.getHours() + ":" + date.getMinutes();
+    }
+
+    // Return a new esri.geometry.Point given a location from Geoloqi
+    function pointFromGeoloqiResult(result) {
+      return new esri.geometry.Point([
+        result.location.position.longitude,
+        result.location.position.latitude],
+        new esri.SpatialReference({ wkid: 4326 })
+      );
+    }
+
+    function autoResize(map) {
+      dojo.connect(map, 'onLoad', function (map) {
+        dojo.connect(window, 'resize', map, map.resize);
+      });
+      dojo.connect(map, 'onResize',  function(extent, width, height) { 
+        map.__resizeCenter = map.extent.getCenter();
+        setTimeout(function() {
+          map.centerAt(map.__resizeCenter);
+        }, 200);
+      });
+    }
+
+    dojo.addOnLoad(init); 
+  </script>
+</head>
+<body>
+  <div class="panel">
+    <div class="titlearea"><span id="titleMessage" class="title-message">Follow the Hootsuite Bus!</span></div>
+  </div>
+  <div id="mapDiv"></div>  
+</body>
+</html>
